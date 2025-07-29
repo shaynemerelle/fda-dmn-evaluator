@@ -12,14 +12,14 @@ app.post("/evaluate", async (req, res) => {
   try {
     let inputVariables = {};
 
-    // Normalize the input
-      inputVariables = 
-      req.body.classification ? { classification: req.body.classification } :
-      req.body.route ? { classification: req.body.route } :
-      req.body.variables?.classification ? { classification: req.body.variables.classification } :
-      req.body.variables?.route ? { classification: req.body.variables.route } :
-      (() => { throw new Error("Missing 'classification' or 'route' in request body."); })();
-
+    // Accept either "route" or "classification"
+    if (req.body.route) {
+      inputVariables = { route: req.body.route };
+    } else if (req.body.classification) {
+      inputVariables = { classification: req.body.classification };
+    } else {
+      throw new Error("Missing required input: 'route' or 'classification'.");
+    }
 
     // Evaluate the DMN decision
     const result = await zeebe.evaluateDecision({
@@ -28,7 +28,9 @@ app.post("/evaluate", async (req, res) => {
       variables: inputVariables,
     });
 
-    // result.decisionOutput is expected to be a JSON string representing an array
+    // Log raw result for debugging
+    console.log("🎯 Raw decision output:", result?.decisionOutput);
+
     let decisionOutput = null;
     try {
       decisionOutput = JSON.parse(result?.decisionOutput ?? "null");
@@ -40,17 +42,25 @@ app.post("/evaluate", async (req, res) => {
       });
     }
 
-    if (!Array.isArray(decisionOutput) || decisionOutput.length === 0) {
-      return res.status(404).json({
-        error: "No matching rule found in the DMN decision table.",
+    // If Camunda returned a single object instead of array
+    if (!Array.isArray(decisionOutput) && typeof decisionOutput === "object") {
+      return res.json({
         input: inputVariables,
+        output: decisionOutput,
       });
     }
 
-    // Return the first matching rule (DMN can return multiple matches in hit policies like 'Collect')
-    res.json({
+    if (Array.isArray(decisionOutput) && decisionOutput.length > 0) {
+      return res.json({
+        input: inputVariables,
+        output: decisionOutput[0],
+      });
+    }
+
+    return res.status(200).json({
+      message: "DMN evaluated successfully, but no matching rule was found.",
       input: inputVariables,
-      output: decisionOutput[0],
+      rawOutput: result?.decisionOutput,
     });
   } catch (error) {
     console.error("❌ DMN Evaluation failed:", error);
