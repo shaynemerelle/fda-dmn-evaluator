@@ -12,7 +12,7 @@ app.post("/evaluate", async (req, res) => {
   try {
     let inputVariables = {};
 
-    // Handle multiple request body formats
+    // Flexible input parsing
     if (req.body.variables && typeof req.body.variables.route === "string") {
       inputVariables = { route: req.body.variables.route };
     } else if (req.body.variables?.route?.value) {
@@ -29,14 +29,26 @@ app.post("/evaluate", async (req, res) => {
       variables: inputVariables,
     });
 
-    let finalRoute = null;
+    // Safely parse the decision output (Zeebe sometimes stringifies it)
+    let decisionOutput = {};
     try {
-      finalRoute = JSON.parse(result?.decisionOutput ?? "null");
-    } catch (parseError) {
-      console.warn("⚠️ Could not parse decisionOutput:", result?.decisionOutput);
+      decisionOutput = typeof result?.decisionOutput === "string"
+        ? JSON.parse(result.decisionOutput)
+        : result.decisionOutput;
+    } catch (err) {
+      console.warn("⚠️ Failed to parse decision output:", result?.decisionOutput);
     }
 
-    res.json({ output: finalRoute });
+    // Explicitly extract each output field
+    const output = {
+      finalRoute: decisionOutput?.finalRoute ?? null,
+      fileLocation: decisionOutput?.fileLocation ?? null,
+      jiraNeeded: decisionOutput?.jiraNeeded ?? null,
+      jiraSummary: decisionOutput?.jiraSummary ?? null,
+      jiraAssignee: decisionOutput?.jiraAssignee ?? null,
+    };
+
+    res.json({ output });
   } catch (error) {
     console.error("❌ DMN Evaluation failed:", error);
     if (!res.headersSent) {
