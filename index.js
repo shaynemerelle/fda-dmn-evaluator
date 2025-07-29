@@ -12,7 +12,7 @@ app.post("/evaluate", async (req, res) => {
   try {
     let inputVariables = {};
 
-    // Flexible input parsing
+    // Normalize the input
     if (req.body.variables && typeof req.body.variables.route === "string") {
       inputVariables = { route: req.body.variables.route };
     } else if (req.body.variables?.route?.value) {
@@ -23,32 +23,37 @@ app.post("/evaluate", async (req, res) => {
       throw new Error("Missing 'route' in request body.");
     }
 
+    // Evaluate the DMN decision
     const result = await zeebe.evaluateDecision({
       decisionId: "Decision_1eofb53",
       decisionRequirementsId: "Definitions_15ecy0z",
       variables: inputVariables,
     });
 
-    // Safely parse the decision output (Zeebe sometimes stringifies it)
-    let decisionOutput = {};
+    // result.decisionOutput is expected to be a JSON string representing an array
+    let decisionOutput = null;
     try {
-      decisionOutput = typeof result?.decisionOutput === "string"
-        ? JSON.parse(result.decisionOutput)
-        : result.decisionOutput;
-    } catch (err) {
-      console.warn("⚠️ Failed to parse decision output:", result?.decisionOutput);
+      decisionOutput = JSON.parse(result?.decisionOutput ?? "null");
+    } catch (parseError) {
+      console.warn("⚠️ Could not parse decisionOutput:", result?.decisionOutput);
+      return res.status(500).json({
+        error: "Failed to parse decisionOutput",
+        rawOutput: result?.decisionOutput,
+      });
     }
 
-    // Explicitly extract each output field
-    const output = {
-      finalRoute: decisionOutput?.finalRoute ?? null,
-      fileLocation: decisionOutput?.fileLocation ?? null,
-      jiraNeeded: decisionOutput?.jiraNeeded ?? null,
-      jiraSummary: decisionOutput?.jiraSummary ?? null,
-      jiraAssignee: decisionOutput?.jiraAssignee ?? null,
-    };
+    if (!Array.isArray(decisionOutput) || decisionOutput.length === 0) {
+      return res.status(404).json({
+        error: "No matching rule found in the DMN decision table.",
+        input: inputVariables,
+      });
+    }
 
-    res.json({ output });
+    // Return the first matching rule (DMN can return multiple matches in hit policies like 'Collect')
+    res.json({
+      input: inputVariables,
+      output: decisionOutput[0],
+    });
   } catch (error) {
     console.error("❌ DMN Evaluation failed:", error);
     if (!res.headersSent) {
