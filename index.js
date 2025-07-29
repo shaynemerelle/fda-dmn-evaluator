@@ -13,15 +13,13 @@ app.post("/evaluate", async (req, res) => {
     let inputVariables = {};
 
     // Normalize the input
-    if (req.body.variables && typeof req.body.variables.route === "string") {
-      inputVariables = { route: req.body.variables.route };
-    } else if (req.body.variables?.route?.value) {
-      inputVariables = { route: req.body.variables.route.value };
-    } else if (req.body.route) {
-      inputVariables = { route: req.body.route };
-    } else {
-      throw new Error("Missing 'route' in request body.");
-    }
+      inputVariables = 
+      req.body.classification ? { classification: req.body.classification } :
+      req.body.route ? { classification: req.body.route } :
+      req.body.variables?.classification ? { classification: req.body.variables.classification } :
+      req.body.variables?.route ? { classification: req.body.variables.route } :
+      (() => { throw new Error("Missing 'classification' or 'route' in request body."); })();
+
 
     // Evaluate the DMN decision
     const result = await zeebe.evaluateDecision({
