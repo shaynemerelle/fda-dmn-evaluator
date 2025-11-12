@@ -10,34 +10,40 @@ const zeebe = c8.getZeebeGrpcApiClient();
 
 app.post("/evaluate", async (req, res) => {
   try {
-    const emails = req.body;
+    // Normalize incoming payloads into an array of emails
+    const emails = Array.isArray(req.body)
+      ? req.body.map(item => item.email || item) // handle [{ email: {...} }]
+      : [req.body.body || req.body]; // handle { body: {...} } or single object
 
-    if (!Array.isArray(emails) || emails.length === 0) {
-      return res.status(400).json({
-        error: "Expected an array of emails in the request body",
-      });
+    if (!emails.length) {
+      return res.status(400).json({ error: "No emails found in request body" });
     }
 
     const results = [];
 
-    for (const item of emails) {
-      const email = item.email;
-
-      if (!email || !email.subject || !email.from?.email) {
+    for (const email of emails) {
+      if (!email || !email.subject || !email.from_?.email) {
         console.warn("⚠️ Skipping invalid email object:", email);
         results.push({
           ok: false,
-          error: "Missing required fields: email.from.email or email.subject",
+          error: "Missing required fields: email.from_.email or email.subject",
+          email,
         });
         continue;
       }
 
       const inputVariables = {
-        from: email.from.email,
+        from: email.from_.email,
         subject: email.subject,
+        body_text: email.body_text || "",
+        attachments: email.attachments || [],
+        headers: email.headers || {},
       };
 
-      console.log("📩 Evaluating DMN for:", inputVariables);
+      console.log("📩 Evaluating DMN for:", {
+        from: inputVariables.from,
+        subject: inputVariables.subject,
+      });
 
       try {
         // --- Evaluate DMN Decision ---
@@ -66,7 +72,7 @@ app.post("/evaluate", async (req, res) => {
         // --- Build structured response ---
         results.push({
           ok: true,
-          email, // ✅ include the original email object here
+          email, // original email object
           from: inputVariables.from,
           subject: inputVariables.subject,
           dmn_output: decisionOutput,
