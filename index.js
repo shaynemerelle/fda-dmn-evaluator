@@ -10,10 +10,15 @@ const zeebe = c8.getZeebeGrpcApiClient();
 
 app.post("/evaluate", async (req, res) => {
   try {
-    // Normalize incoming payloads into an array of emails
-    const emails = Array.isArray(req.body)
-      ? req.body.map(item => item.email || item) // handle [{ email: {...} }]
-      : [req.body.body || req.body]; // handle { body: {...} } or single object
+    // Normalize payload to an array of email objects
+    let emails = [];
+    if (Array.isArray(req.body)) {
+      emails = req.body.map(item => item.email || item.body || item);
+    } else if (req.body.body || req.body.email) {
+      emails = [req.body.body || req.body.email];
+    } else {
+      emails = [req.body];
+    }
 
     if (!emails.length) {
       return res.status(400).json({ error: "No emails found in request body" });
@@ -22,22 +27,27 @@ app.post("/evaluate", async (req, res) => {
     const results = [];
 
     for (const email of emails) {
-      if (!email || !email.subject || !email.from_?.email) {
+      if (!email || !email.subject || !(email.from?.email || email.from_?.email)) {
         console.warn("⚠️ Skipping invalid email object:", email);
         results.push({
           ok: false,
-          error: "Missing required fields: email.from_.email or email.subject",
+          error: "Missing required fields: email.from.email / email.from_.email or email.subject",
           email,
         });
         continue;
       }
 
       const inputVariables = {
-        from: email.from_.email,
+        from: email.from?.email || email.from_?.email,
         subject: email.subject,
         body_text: email.body_text || "",
         attachments: email.attachments || [],
         headers: email.headers || {},
+        to: email.to || [],
+        cc: email.cc || [],
+        bcc: email.bcc || [],
+        message_id: email.message_id || null,
+        internet_message_id: email.internet_message_id || null,
       };
 
       console.log("📩 Evaluating DMN for:", {
@@ -52,9 +62,6 @@ app.post("/evaluate", async (req, res) => {
           decisionRequirementsId: "defs_email_routing",
           variables: inputVariables,
         });
-
-        console.log("📘 Full DMN evaluation result:");
-        console.log(JSON.stringify(result, null, 2));
 
         // --- Parse DMN output ---
         let decisionOutput = null;
