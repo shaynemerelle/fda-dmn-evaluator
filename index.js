@@ -10,66 +10,95 @@ const zeebe = c8.getZeebeGrpcApiClient();
 
 app.post("/evaluate", async (req, res) => {
   try {
-    let inputVariables = {};
+    const emails = req.body;
 
-    // Accept either "route" or "classification"
-    if (req.body.route) {
-      inputVariables = { route: req.body.route };
-    } else if (req.body.classification) {
-      inputVariables = { classification: req.body.classification };
-    } else {
-      throw new Error("Missing required input: 'route' or 'classification'.");
-    }
-
-    // Evaluate the DMN decision
-    const result = await zeebe.evaluateDecision({
-      decisionId: "Decision_1eofb53",
-      decisionRequirementsId: "Definitions_15ecy0z",
-      variables: inputVariables,
-    });
-
-    // Log raw result for debugging
-    console.log("🎯 Raw decision output:", result?.decisionOutput);
-
-    let decisionOutput = null;
-    try {
-      decisionOutput = JSON.parse(result?.decisionOutput ?? "null");
-    } catch (parseError) {
-      console.warn("⚠️ Could not parse decisionOutput:", result?.decisionOutput);
-      return res.status(500).json({
-        error: "Failed to parse decisionOutput",
-        rawOutput: result?.decisionOutput,
+    if (!Array.isArray(emails) || emails.length === 0) {
+      return res.status(400).json({
+        error: "Expected an array of emails in the request body",
       });
     }
 
-    // If Camunda returned a single object instead of array
-    if (!Array.isArray(decisionOutput) && typeof decisionOutput === "object") {
-      return res.json({
-        input: inputVariables,
-        output: decisionOutput,
-      });
+    const results = [];
+
+    for (const item of emails) {
+      const email = item.email;
+
+      if (!email || !email.subject || !email.from?.email) {
+        console.warn("⚠️ Skipping invalid email object:", email);
+        results.push({
+          ok: false,
+          error: "Missing required fields: email.from.email or email.subject",
+        });
+        continue;
+      }
+
+      const inputVariables = {
+        from: email.from.email,
+        subject: email.subject,
+      };
+
+      console.log("📩 Evaluating DMN for:", inputVariables);
+
+      try {
+        // --- Evaluate DMN Decision ---
+        const result = await zeebe.evaluateDecision({
+          decisionId: "dec_email_routing",
+          decisionRequirementsId: "defs_email_routing",
+          variables: inputVariables,
+        });
+
+        console.log("📘 Full DMN evaluation result:");
+        console.log(JSON.stringify(result, null, 2));
+
+        // --- Parse DMN output ---
+        let decisionOutput = null;
+        if (result?.decisionOutput) {
+          try {
+            decisionOutput = JSON.parse(result.decisionOutput);
+          } catch (err) {
+            console.warn("⚠️ Could not parse DMN output:", result.decisionOutput);
+            decisionOutput = { error: "Failed to parse DMN output", raw: result.decisionOutput };
+          }
+        } else {
+          decisionOutput = { dmn_evaluation: "No output returned by DMN" };
+        }
+
+        // --- Build structured response ---
+        results.push({
+          ok: true,
+          email, // ✅ include the original email object here
+          from: inputVariables.from,
+          subject: inputVariables.subject,
+          dmn_output: decisionOutput,
+          dmn_meta: {
+            decisionId: result?.decisionId || null,
+            decisionName: result?.decisionName || null,
+            decisionDefinitionId: result?.decisionDefinitionId || null,
+            decisionRequirementsId: result?.decisionRequirementsId || null,
+            tenantId: result?.tenantId || "<default>",
+          },
+        });
+      } catch (dmnErr) {
+        console.error("❌ DMN evaluation failed:", dmnErr);
+        results.push({
+          ok: false,
+          email,
+          from: inputVariables.from,
+          subject: inputVariables.subject,
+          error: dmnErr.message || "DMN evaluation failed",
+        });
+      }
     }
 
-    if (Array.isArray(decisionOutput) && decisionOutput.length > 0) {
-      return res.json({
-        input: inputVariables,
-        output: decisionOutput[0],
-      });
-    }
-
-    return res.status(200).json({
-      message: "DMN evaluated successfully, but no matching rule was found.",
-      input: inputVariables,
-      rawOutput: result?.decisionOutput,
+    res.json({
+      evaluated_at: new Date().toISOString(),
+      results,
     });
   } catch (error) {
-    console.error("❌ DMN Evaluation failed:", error);
-    if (!res.headersSent) {
-      res.status(500).json({
-        error: error.message,
-        details: error.details,
-      });
-    }
+    console.error("❌ Server error:", error);
+    res.status(500).json({
+      error: error.message || "Internal Server Error",
+    });
   }
 });
 
