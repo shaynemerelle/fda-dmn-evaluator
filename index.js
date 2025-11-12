@@ -9,8 +9,13 @@ const c8 = new Camunda8();
 const zeebe = c8.getZeebeGrpcApiClient();
 
 app.post("/evaluate", async (req, res) => {
+  console.log("==============================================");
+  console.log("📥 Incoming request at /evaluate");
+  console.log("Timestamp:", new Date().toISOString());
+  console.log("Request body:", JSON.stringify(req.body, null, 2));
+
   try {
-    // Normalize payload to an array of email objects
+    // Normalize payload to array of emails
     let emails = [];
     if (Array.isArray(req.body)) {
       emails = req.body.map(item => item.email || item.body || item);
@@ -21,12 +26,20 @@ app.post("/evaluate", async (req, res) => {
     }
 
     if (!emails.length) {
+      console.warn("⚠️ No emails found in request body");
       return res.status(400).json({ error: "No emails found in request body" });
     }
 
     const results = [];
 
-    for (const email of emails) {
+    for (const [index, email] of emails.entries()) {
+      console.log(`\n📨 Processing email #${index + 1}`);
+      console.log("Email preview:", {
+        subject: email?.subject,
+        from: email?.from?.email || email?.from_?.email,
+        message_id: email?.message_id,
+      });
+
       if (!email || !email.subject || !(email.from?.email || email.from_?.email)) {
         console.warn("⚠️ Skipping invalid email object:", email);
         results.push({
@@ -50,10 +63,7 @@ app.post("/evaluate", async (req, res) => {
         internet_message_id: email.internet_message_id || null,
       };
 
-      console.log("📩 Evaluating DMN for:", {
-        from: inputVariables.from,
-        subject: inputVariables.subject,
-      });
+      console.log("🔹 DMN evaluation input variables:", JSON.stringify(inputVariables, null, 2));
 
       try {
         // --- Evaluate DMN Decision ---
@@ -62,6 +72,8 @@ app.post("/evaluate", async (req, res) => {
           decisionRequirementsId: "defs_email_routing",
           variables: inputVariables,
         });
+
+        console.log("✅ DMN evaluation completed");
 
         // --- Parse DMN output ---
         let decisionOutput = null;
@@ -76,10 +88,11 @@ app.post("/evaluate", async (req, res) => {
           decisionOutput = { dmn_evaluation: "No output returned by DMN" };
         }
 
-        // --- Build structured response ---
+        console.log("📘 DMN output:", JSON.stringify(decisionOutput, null, 2));
+
         results.push({
           ok: true,
-          email, // original email object
+          email,
           from: inputVariables.from,
           subject: inputVariables.subject,
           dmn_output: decisionOutput,
@@ -91,6 +104,8 @@ app.post("/evaluate", async (req, res) => {
             tenantId: result?.tenantId || "<default>",
           },
         });
+
+        console.log(`📝 Email #${index + 1} processed successfully`);
       } catch (dmnErr) {
         console.error("❌ DMN evaluation failed:", dmnErr);
         results.push({
@@ -102,6 +117,9 @@ app.post("/evaluate", async (req, res) => {
         });
       }
     }
+
+    console.log("\n📊 Final results summary:");
+    console.log(JSON.stringify(results, null, 2));
 
     res.json({
       evaluated_at: new Date().toISOString(),
