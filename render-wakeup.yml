@@ -1,0 +1,17 @@
+name: Ping Render App Every 15 Minutes
+
+on:
+  schedule:
+    # Every 15 minutes (in UTC)
+    - cron: "*/15 * * * *"
+  workflow_dispatch: # optional: lets you run it manually from the Actions tab
+
+jobs:
+  ping-render:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Ping FDA DMN Evaluator
+        run: |
+          echo "Pinging Render app at $(date -u)"
+          curl -sS -o /dev/null -w "HTTP %{http_code}\n" https://fda-dmn-evaluator.onrender.com/ || echo "Ping failed"
