@@ -67,7 +67,7 @@ function extractEmails(body) {
   return [];
 }
 
-// ---- Routes -------------------------------------------------------------
+// ---- Routes ------------------------------------------------------------
 
 app.post("/evaluate", async (req, res) => {
   console.log("==============================================");
@@ -171,7 +171,7 @@ app.post("/evaluate", async (req, res) => {
 
         results.push({
           classification: decisionOutput,
-          confidence:1
+          confidence: 1,
         });
 
         console.log(`📝 Email #${index + 1} processed successfully`);
@@ -200,6 +200,18 @@ app.post("/evaluate", async (req, res) => {
       error: error.message || "Internal Server Error",
     });
   }
+});
+
+// ---- Wake-up / Healthcheck Route ----------------------------------------
+
+app.get("/", (req, res) => {
+  res.json({
+    status: "ok",
+    message: "DMN evaluator is awake 👋",
+    evaluatedDecisionId: DMN_DECISION_ID,
+    timestamp: new Date().toISOString(),
+    uptime_seconds: process.uptime(),
+  });
 });
 
 // ---- Start Server -------------------------------------------------------
